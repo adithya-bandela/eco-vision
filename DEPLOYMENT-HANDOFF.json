@@ -1,0 +1,24 @@
+{
+  "workspaceSlug": "adithya-bandela-eco-vision-gen-ai",
+  "workspaceId": "team_KNAM8zekgz1k4Tci3knBKg8i",
+  "projectName": "adithya-bandela-eco-vision",
+  "projectId": "prj_5a39Ur3i0AEVJDY4prbhdHoNIb5G",
+  "deploymentId": "dpl_6xJYw8dfnqH2uUSmi5NJmV6L7C9V",
+  "url": "https://adithya-bandela-eco-vision.vercel.app",
+  "status": "READY",
+  "framework": "nextjs",
+  "environment": "production",
+  "pendingAction": null,
+  "verified": {
+    "homepage200": true,
+    "liveVision": true,
+    "liveScanStatus": 200,
+    "materialGroups": 4,
+    "scanSeconds": 3.315,
+    "renderedCards": 5,
+    "mobileOverflow": false,
+    "pageErrors": 0,
+    "clientKeyExposure": false
+  },
+  "serverSecretConfigured": true
+}

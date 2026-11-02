@@ -1,0 +1,31 @@
+import {readFile,mkdir,writeFile} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+const target=path.resolve('work/test-runtime');await mkdir(target,{recursive:true});
+for(const name of ['schema','data','guidance','analyze']){const source=await readFile(`lib/${name}.ts`,'utf8');const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText.replace(/from ['"]\.\/(schema|data|guidance)['"]/g,"from './$1.js'");await writeFile(path.join(target,name+'.js'),compiled)}
+const {reportSchema}=await import(pathToFileURL(path.join(target,'schema.js')).href);
+const {demoReport,impact,disposalRule}=await import(pathToFileURL(path.join(target,'data.js')).href);
+const {analyzeImage:analyzeRaw,AnalysisError}=await import(pathToFileURL(path.join(target,'analyze.js')).href);
+const analyzeImage=(...args)=>analyzeRaw(...args,'full');
+let tests=0;async function check(name,fn){await fn();tests++;console.log('PASS '+name)}
+const copy=()=>structuredClone(demoReport);const good=()=>Response.json({choices:[{message:{content:JSON.stringify(demoReport)},finish_reason:'stop'}]});
+await check('curated report matches the full schema',()=>assert(reportSchema.safeParse(demoReport).success));
+await check('empty scenes are accepted',()=>assert(reportSchema.safeParse({summary:'No discarded materials identified. Try a closer photo.',overall_eco_score:0,items:[],tips:['Keep choosing reusable items.']}).success));
+await check('missing nested safety guidance is rejected',()=>{const r=copy();delete r.items[0].harm_if_not_recycled;assert(!reportSchema.safeParse(r).success)});
+await check('out-of-image bounding boxes are rejected',()=>{const r=copy();r.items[0].bounding_box.x=99;assert(!reportSchema.safeParse(r).success)});
+await check('invalid categories and confidence are rejected',()=>{const r=copy();r.items[0].category='invented';r.items[0].confidence=101;assert(!reportSchema.safeParse(r).success)});
+await check('negative quantity is rejected',()=>{const r=copy();r.items[0].quantity_estimate=-1;assert(!reportSchema.safeParse(r).success)});
+await check('excessive output is rejected',()=>{const r=copy();r.items=Array(61).fill(r.items[0]);assert(!reportSchema.safeParse(r).success)});
+await check('valid provider JSON passes through',async()=>assert.deepEqual(await analyzeImage('data:image/jpeg;base64,AA==','test','model','India',async()=>good()),demoReport));
+await check('malformed JSON retries once and recovers',async()=>{let calls=0;const r=await analyzeImage('image','test','model','India',async()=>++calls===1?Response.json({choices:[{message:{content:'{broken'}}]}):good());assert.equal(calls,2);assert.equal(r.items.length,3)});
+await check('invalid schema retries once and fails safely',async()=>{let calls=0;await assert.rejects(()=>analyzeImage('image','test','model','India',async()=>{calls++;return Response.json({choices:[{message:{content:'{}'}}]})}),AnalysisError);assert.equal(calls,2)});
+await check('truncation retries rather than returning a partial report',async()=>{let calls=0;await assert.rejects(()=>analyzeImage('image','test','model','India',async()=>{calls++;return Response.json({choices:[{message:{content:JSON.stringify(demoReport)},finish_reason:'length'}]})}),AnalysisError);assert.equal(calls,2)});
+await check('quota error is preserved without upstream body disclosure',async()=>{await assert.rejects(()=>analyzeImage('image','test','model','India',async()=>new Response('secret upstream details',{status:429})),e=>e.status===429&&!e.message.includes('secret'))});
+await check('missing API key fails before networking',async()=>{await assert.rejects(()=>analyzeImage('image','','model','India',async()=>{throw Error('should not call')}),e=>e.status===503)});
+await check('impact scales with mass and excludes low-confidence material',()=>{assert(Math.abs(impact(demoReport,2).co2-impact(demoReport).co2*2)<1e-9);const r=copy();r.items.forEach(i=>i.confidence=20);assert.equal(impact(r).co2,0)});
+await check('hazardous waste never gets a household recycling bin',()=>{const item={...demoReport.items[0],category:'hazardous'};for(const country of ['India','United States','United Kingdom','Australia'])assert.equal(disposalRule(item,country).label,'Specialist collection')});
+await check('compact detector expands to complete validated report',async()=>{const result=await analyzeRaw('image','test','model','India',async()=>Response.json({choices:[{message:{content:JSON.stringify({summary:'A discarded bottle.',score:70,items:[['Bottle','plastic','uncertain',1,80,[0,0,20,30]]],tips:['Check local acceptance.']})}}]}));assert(reportSchema.safeParse(result).success);assert.equal(result.items[0].name,'Bottle')});
+await check('risky material names disable ordinary recycling',async()=>{const result=await analyzeRaw('image','test','model','India',async()=>Response.json({choices:[{message:{content:JSON.stringify({summary:'A battery.',score:0,items:[['Battery','metal','uncertain',1,80,[0,0,20,30]]],tips:['Use specialist collection.']})}}]}));assert.equal(result.items[0].recycling.recyclable,false);assert.equal(result.items[0].treatment_method,'hazardous waste facility')});
+console.log(`${tests} checks passed.`);
