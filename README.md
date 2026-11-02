@@ -1,4 +1,4 @@
-# EcoVision — Vercel deployment
+# EcoVision
 
 The minimal green EcoVision interface, packaged for standard Next.js on Vercel. The current Sites deployment is unchanged.
 
